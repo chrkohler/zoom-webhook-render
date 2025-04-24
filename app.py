@@ -45,7 +45,6 @@ def send_to_google_chat(message):
         app.logger.error(f"Error enviando mensaje a Google Chat: {str(e)}")
         return False
 
-# Ruta raíz para verificar que el servicio está funcionando
 @app.route('/')
 def root():
     return jsonify({
@@ -57,7 +56,6 @@ def root():
         ]
     }), 200
 
-# Ruta de health check sin el prefijo zoom-webhook
 @app.route('/health')
 def health():
     return jsonify({
@@ -69,16 +67,12 @@ def health():
         'zoom_token_configured': bool(WEBHOOK_SECRET_TOKEN)
     }), 200
 
-# Ruta principal para el webhook sin el prefijo zoom-webhook
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     app.logger.info(f"Request from IP: {request.remote_addr}")
-    """Endpoint principal para webhooks de Zoom"""
-    # Log de método y headers para diagnóstico
     app.logger.info(f"Método recibido: {request.method}")
     app.logger.info(f"Headers recibidos: {dict(request.headers)}")
 
-    # Para solicitudes GET (útil para pruebas)
     if request.method == 'GET':
         return jsonify({
             'status': 'ready',
@@ -86,45 +80,32 @@ def webhook():
         }), 200
 
     try:
-        # Log del body recibido
         data = request.get_json(silent=True)
         app.logger.info(f"Body recibido: {data}")
 
-        # Si no hay datos JSON válidos
-        if data is None:
-            return jsonify({
-                'status': 'error',
-                'message': 'No JSON data received'
-            }), 200  # 200 OK para Zoom aunque sea error
-
-        # Validación inicial de Zoom (plainToken)
-        if "plainToken" in data:
-            plain_token = data["plainToken"]
-            app.logger.info(f"Recibido plainToken para validación: {plain_token}")
-
-            # Firmar el plainToken usando HMAC SHA256
-            hash_for_token = hmac.new(
-                WEBHOOK_SECRET_TOKEN.encode('utf-8'),
-                msg=plain_token.encode('utf-8'),
-                digestmod=hashlib.sha256
-            ).digest()
-            encrypted_token = base64.b64encode(hash_for_token).decode('utf-8')
-
-            response = {
-                "plainToken": plain_token,
-                "encryptedToken": encrypted_token
-            }
-            app.logger.info(f"Respondiendo a validación de Zoom: {response}")
-            return jsonify(response), 200
+        # Validación inicial de Zoom (endpoint.url_validation)
+        if data and data.get('event') == 'endpoint.url_validation':
+            plain_token = data.get('payload', {}).get('plainToken')
+            if plain_token:
+                app.logger.info(f"Recibido plainToken para validación: {plain_token}")
+                hash_for_token = hmac.new(
+                    WEBHOOK_SECRET_TOKEN.encode('utf-8'),
+                    msg=plain_token.encode('utf-8'),
+                    digestmod=hashlib.sha256
+                ).digest()
+                encrypted_token = base64.b64encode(hash_for_token).decode('utf-8')
+                response = {
+                    "plainToken": plain_token,
+                    "encryptedToken": encrypted_token
+                }
+                app.logger.info(f"Respondiendo a validación de Zoom: {response}")
+                return jsonify(response), 200
 
         # Procesamiento de eventos normales
-        event = data.get('event')
+        event = data.get('event') if data else None
         if not event:
             app.logger.info("Petición sin evento - posible prueba")
-            return jsonify({
-                'status': 'ok',
-                'message': 'no event but accepted'
-            }), 200
+            return jsonify({'status': 'ok', 'message': 'no event but accepted'}), 200
 
         # Extraer información del evento
         payload = data.get('payload', {}).get('object', {})
