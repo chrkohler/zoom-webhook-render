@@ -17,7 +17,7 @@ logging.basicConfig(
 
 # Configuración específica
 GOOGLE_CHAT_WEBHOOK_URL = "https://chat.googleapis.com/v1/spaces/AAQA0RGKcXM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=vtK7l458_AvwTQjctG-WGprheihrzEhm3je68Hjb77Q"
-WEBHOOK_SECRET_TOKEN = "pUxoz2wNR0uiHOOqegBUfQ"  # Tu nuevo token
+WEBHOOK_SECRET_TOKEN = "pUxoz2wNR0uiHOOqegBUfQ"
 MEETING_IDS = [
     "93858743199",
     "91678387079",
@@ -28,28 +28,6 @@ MEETING_IDS = [
     "95692627898",
     "96023758677"
 ]
-
-def verify_zoom_webhook(request_body, request_headers):
-    """Verifica la firma del webhook de Zoom"""
-    try:
-        timestamp = request_headers.get('X-Zm-Request-Timestamp', '')
-        signature = request_headers.get('X-Zm-Signature', '')
-
-        if not timestamp or not signature:
-            return False
-
-        message = f"v0:{timestamp}:{request_body}"
-        hash_object = hmac.new(
-            WEBHOOK_SECRET_TOKEN.encode('utf-8'),
-            message.encode('utf-8'),
-            hashlib.sha256
-        )
-        expected_signature = f"v0={hash_object.hexdigest()}"
-
-        return signature == expected_signature
-    except Exception as e:
-        app.logger.error(f"Error verificando webhook: {str(e)}")
-        return False
 
 def send_to_google_chat(message):
     """Envía mensaje a Google Chat con manejo de errores"""
@@ -67,33 +45,126 @@ def send_to_google_chat(message):
         app.logger.error(f"Error enviando mensaje a Google Chat: {str(e)}")
         return False
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.get_json(silent=True)
-    # Si es validación de URL, responde sin verificar la firma
-    if data and data.get('event') == 'endpoint.url_validation':
-        plain_token = data.get('payload', {}).get('plainToken')
-        if plain_token:
-            import hmac, hashlib, base64
-            secret = "pUxoz2wNR0uiHOOqegBUfQ"
-            hash_object = hmac.new(
-                secret.encode('utf-8'),
-                plain_token.encode('utf-8'),
-                hashlib.sha256
-            )
-            encrypted_token = base64.b64encode(hash_object.digest()).decode('utf-8')
-            return jsonify({
-                "plainToken": plain_token,
-                "encryptedToken": encrypted_token
-            }), 200
-    # Para otros eventos, aquí sí puedes verificar la firma si lo deseas
-    return jsonify({"status": "ok"}), 200
+@app.route('/')
+def root():
+    return jsonify({
+        'status': 'running',
+        'message': 'Zoom Webhook Service is running',
+        'endpoints': ['/webhook']
+    }), 200
 
-        # ... resto del código para procesar eventos normales ...
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    """Endpoint principal para webhooks de Zoom"""
+    app.logger.info(f"Request from IP: {request.remote_addr}")
+    app.logger.info(f"Método recibido: {request.method}")
+    app.logger.info(f"Headers recibidos: {dict(request.headers)}")
+
+    if request.method == 'GET':
+        return jsonify({
+            'status': 'ready',
+            'message': 'Zoom Webhook endpoint is ready for POST requests'
+        }), 200
+
+    try:
+        data = request.get_json(silent=True)
+        app.logger.info(f"Body recibido: {data}")
+
+        # Validación inicial de Zoom (endpoint.url_validation)
+        if data and data.get('event') == 'endpoint.url_validation':
+            plain_token = data.get('payload', {}).get('plainToken')
+            if plain_token:
+                app.logger.info(f"Recibido plainToken para validación: {plain_token}")
+                hash_object = hmac.new(
+                    WEBHOOK_SECRET_TOKEN.encode('utf-8'),
+                    plain_token.encode('utf-8'),
+                    hashlib.sha256
+                )
+                encrypted_token = base64.b64encode(hash_object.digest()).decode('utf-8')
+                response = {
+                    "plainToken": plain_token,
+                    "encryptedToken": encrypted_token
+                }
+                app.logger.info(f"Respondiendo a validación de Zoom: {response}")
+                return jsonify(response), 200
+
+        # Procesamiento de eventos normales
+        event = data.get('event') if data else None
+        if not event:
+            app.logger.info("Petición sin evento - posible prueba")
+            return jsonify({'status': 'ok', 'message': 'no event but accepted'}), 200
+
+        # Extraer información del evento
+        payload = data.get('payload', {}).get('object', {})
+        meeting_id = str(payload.get('id', ''))
+        topic = payload.get('topic', 'Sin título')
+        host_email = payload.get('host_email', 'No disponible')
+
+        # Verificar si la reunión está en la lista de monitoreo
+        if meeting_id and meeting_id not in MEETING_IDS:
+            app.logger.info(f"Reunión {meeting_id} no está en la lista de monitoreo")
+            return jsonify({
+                'status': 'ignored',
+                'reason': 'meeting_id not monitored',
+                'meeting_id': meeting_id
+            }), 200
+
+        # Definir mensajes para diferentes eventos
+        messages = {
+            'meeting.started': (
+                f'🟢 Reunión iniciada\n'
+                f'📅 Título: "{topic}"\n'
+                f'🆔 ID: {meeting_id}\n'
+                f'👤 Host: {host_email}'
+            ),
+            'meeting.live_streaming_started': (
+                f'🔴 Transmisión en vivo iniciada\n'
+                f'📅 Título: "{topic}"\n'
+                f'🆔 ID: {meeting_id}\n'
+                f'👤 Host: {host_email}'
+            ),
+            'meeting.ended': (
+                f'⭕ Reunión finalizada\n'
+                f'📅 Título: "{topic}"\n'
+                f'🆔 ID: {meeting_id}\n'
+                f'👤 Host: {host_email}'
+            )
+        }
+
+        # Procesar evento si está en la lista de mensajes
+        if event in messages:
+            message = messages[event]
+            app.logger.info(f"Procesando evento {event} para reunión {meeting_id}")
+
+            if send_to_google_chat(message):
+                return jsonify({
+                    'status': 'success',
+                    'message': 'notification sent',
+                    'event': event,
+                    'meeting_id': meeting_id
+                }), 200
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'failed to send notification',
+                    'event': event,
+                    'meeting_id': meeting_id
+                }), 200
+
+        # Evento no monitoreado
+        app.logger.info(f"Evento no monitoreado: {event}")
+        return jsonify({
+            'status': 'ignored',
+            'reason': 'event not monitored',
+            'event': event
+        }), 200
 
     except Exception as e:
         app.logger.error(f"Error procesando webhook: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 200
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
