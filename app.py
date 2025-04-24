@@ -15,7 +15,7 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s'
 )
 
-# Configuración específica (en producción usar variables de entorno)
+# Configuración específica
 GOOGLE_CHAT_WEBHOOK_URL = "https://chat.googleapis.com/v1/spaces/AAQA0RGKcXM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=vtK7l458_AvwTQjctG-WGprheihrzEhm3je68Hjb77Q"
 WEBHOOK_SECRET_TOKEN = "MXfr7_3CRVykkBFQIAA6Tg"
 MEETING_IDS = [
@@ -45,9 +45,21 @@ def send_to_google_chat(message):
         app.logger.error(f"Error enviando mensaje a Google Chat: {str(e)}")
         return False
 
-@app.route('/zoom-webhook/health')
-def health_check():
-    """Endpoint de verificación de salud"""
+# Ruta raíz para verificar que el servicio está funcionando
+@app.route('/')
+def root():
+    return jsonify({
+        'status': 'running',
+        'message': 'Zoom Webhook Service is running',
+        'endpoints': [
+            '/health',
+            '/webhook'
+        ]
+    }), 200
+
+# Ruta de health check sin el prefijo zoom-webhook
+@app.route('/health')
+def health():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
@@ -57,17 +69,35 @@ def health_check():
         'zoom_token_configured': bool(WEBHOOK_SECRET_TOKEN)
     }), 200
 
-@app.route('/zoom-webhook', methods=['POST'])
-def zoom_webhook():
+# Ruta principal para el webhook sin el prefijo zoom-webhook
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
     """Endpoint principal para webhooks de Zoom"""
+    # Log de método y headers para diagnóstico
+    app.logger.info(f"Método recibido: {request.method}")
+    app.logger.info(f"Headers recibidos: {dict(request.headers)}")
+
+    # Para solicitudes GET (útil para pruebas)
+    if request.method == 'GET':
+        return jsonify({
+            'status': 'ready',
+            'message': 'Zoom Webhook endpoint is ready for POST requests'
+        }), 200
+
     try:
-        # Log de headers y body para diagnóstico
-        app.logger.info(f"Headers recibidos: {dict(request.headers)}")
+        # Log del body recibido
         data = request.get_json(silent=True)
         app.logger.info(f"Body recibido: {data}")
 
+        # Si no hay datos JSON válidos
+        if data is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'No JSON data received'
+            }), 200  # 200 OK para Zoom aunque sea error
+
         # Validación inicial de Zoom (plainToken)
-        if data and "plainToken" in data:
+        if "plainToken" in data:
             plain_token = data["plainToken"]
             app.logger.info(f"Recibido plainToken para validación: {plain_token}")
 
@@ -87,10 +117,13 @@ def zoom_webhook():
             return jsonify(response), 200
 
         # Procesamiento de eventos normales
-        event = data.get('event') if data else None
+        event = data.get('event')
         if not event:
             app.logger.info("Petición sin evento - posible prueba")
-            return jsonify({'status': 'ok', 'message': 'no event but accepted'}), 200
+            return jsonify({
+                'status': 'ok',
+                'message': 'no event but accepted'
+            }), 200
 
         # Extraer información del evento
         payload = data.get('payload', {}).get('object', {})
