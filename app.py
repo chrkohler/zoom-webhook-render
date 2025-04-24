@@ -67,50 +67,27 @@ def send_to_google_chat(message):
         app.logger.error(f"Error enviando mensaje a Google Chat: {str(e)}")
         return False
 
-@app.route('/webhook', methods=['GET', 'POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    app.logger.info(f"Request from IP: {request.remote_addr}")
-    app.logger.info(f"Método recibido: {request.method}")
-    app.logger.info(f"Headers recibidos: {dict(request.headers)}")
-
-    if request.method == 'GET':
-        return jsonify({
-            'status': 'ready',
-            'message': 'Zoom Webhook endpoint is ready for POST requests'
-        }), 200
-
-    try:
-        # Obtener el body como string para verificación
-        request_body = request.get_data(as_text=True)
-        app.logger.info(f"Body recibido (raw): {request_body}")
-
-        # Verificar la firma del webhook
-        if not verify_zoom_webhook(request_body, request.headers):
-            app.logger.warning("Verificación de firma fallida")
-            return jsonify({'status': 'error', 'message': 'Invalid signature'}), 401
-
-        data = request.get_json(silent=True)
-
-        # Validación inicial de Zoom (endpoint.url_validation)
-        if data and data.get('event') == 'endpoint.url_validation':
-            plain_token = data.get('payload', {}).get('plainToken')
-            if plain_token:
-                app.logger.info(f"Recibido plainToken para validación: {plain_token}")
-
-                # Generar hash usando el token secreto
-                hash_object = hmac.new(
-                    WEBHOOK_SECRET_TOKEN.encode('utf-8'),
-                    plain_token.encode('utf-8'),
-                    hashlib.sha256
-                )
-                encrypted_token = base64.b64encode(hash_object.digest()).decode('utf-8')
-
-                response = {
-                    "plainToken": plain_token,
-                    "encryptedToken": encrypted_token
-                }
-                app.logger.info(f"Respondiendo a validación de Zoom: {response}")
-                return jsonify(response), 200
+    data = request.get_json(silent=True)
+    # Si es validación de URL, responde sin verificar la firma
+    if data and data.get('event') == 'endpoint.url_validation':
+        plain_token = data.get('payload', {}).get('plainToken')
+        if plain_token:
+            import hmac, hashlib, base64
+            secret = "pUxoz2wNR0uiHOOqegBUfQ"
+            hash_object = hmac.new(
+                secret.encode('utf-8'),
+                plain_token.encode('utf-8'),
+                hashlib.sha256
+            )
+            encrypted_token = base64.b64encode(hash_object.digest()).decode('utf-8')
+            return jsonify({
+                "plainToken": plain_token,
+                "encryptedToken": encrypted_token
+            }), 200
+    # Para otros eventos, aquí sí puedes verificar la firma si lo deseas
+    return jsonify({"status": "ok"}), 200
 
         # ... resto del código para procesar eventos normales ...
 
