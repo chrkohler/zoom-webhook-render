@@ -17,7 +17,7 @@ logging.basicConfig(
 
 # Configuración específica
 GOOGLE_CHAT_WEBHOOK_URL = "https://chat.googleapis.com/v1/spaces/AAQA0RGKcXM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=vtK7l458_AvwTQjctG-WGprheihrzEhm3je68Hjb77Q"
-WEBHOOK_SECRET_TOKEN = "pUxoz2wNR0uiHOOqegBUfQ"
+WEBHOOK_SECRET_TOKEN = "aEoem48nQ_ex8iE49Yvvnw"
 MEETING_IDS = [
     "93858743199",
     "91678387079",
