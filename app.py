@@ -72,6 +72,7 @@ def health():
 # Ruta principal para el webhook sin el prefijo zoom-webhook
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
+    app.logger.info(f"Request from IP: {request.remote_addr}")
     """Endpoint principal para webhooks de Zoom"""
     # Log de método y headers para diagnóstico
     app.logger.info(f"Método recibido: {request.method}")
